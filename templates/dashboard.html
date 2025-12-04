@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8" />
+  <title>Map + Vehicle Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+  <!-- 상단: 영상 + 지도 -->
+  <div id="top-section">
+    <div id="video-section">
+      <!-- ✅ 처음엔 no_signal.png로 표시, 실시간 프레임 오면 교체됨 -->
+      <img id="cam1" class="video-feed"
+           src="{{ url_for('static', filename='images/no_signal.png') }}"
+           alt="Camera 1" />
+    </div>
+    <div id="map_div"></div>
+  </div>
+
+  <!-- 버튼 영역 -->
+  <div id="button-section">
+    <a href="{{ url_for('video.video_logs') }}" class="btn">🎥 비디오 로그 보기</a>
+    <a href="{{ url_for('auth.logout') }}" class="btn">🚪 로그아웃</a>
+  </div>
+
+  <!-- 하단: 차량 로그 -->
+  <div id="log-section">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>차량 고유 번호</th>
+          <th>출발 시간</th>
+          <th>도착 시간</th>
+          <th>출발지</th>
+          <th>목적지</th>
+        </tr>
+      </thead>
+      <tbody id="vehicle-log-body">
+        <!-- ✅ 소켓 이벤트(vehicle_log_update, ambulance_start)로 데이터가 동적으로 추가됨 -->
+      </tbody>
+    </table>
+  </div>
+
+  <!-- JS -->
+  <script src="https://code.jquery.com/jquery-1.12.4.min.js"></script>
+  <script src="https://apis.openapi.sk.com/tmap/jsv2?version=1&format=javascript&appKey=73xHlMiaGI39dgyBwYeO55jUPwFiKn4027JN3ntC"></script>
+
+
+  <!-- ✅ 기능별 분리 -->
+  <script src="{{ url_for('static', filename='js/drawline.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/camera.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/vehicle_log.js') }}"></script>
+</body>
+
+</html>

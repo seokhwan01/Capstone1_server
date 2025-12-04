@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>비디오 로그</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+  <header>
+    <h1>🚑 긴급차량 관제 시스템</h1>
+    <nav>
+      <a href="{{ url_for('dashboard.dashboard') }}">대시보드</a>
+      <a href="{{ url_for('video.video_logs') }}">비디오 로그</a>
+      <a href="{{ url_for('auth.logout') }}">로그아웃</a>
+    </nav>
+  </header>
+
+  <main>
+    <h2>비디오 로그 페이지</h2>
+    <p>긴급차량 출동 영상 기록</p>
+
+
+    <table class="log-table">
+      <thead>
+        <tr>
+          <th>차량 번호</th>
+          <th>출동 시간</th>
+          <th>영상</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in video_logs %}
+        <tr>
+          <td>{{ log.vehicle_id }}</td>
+          <td>{{ log.time }}</td>
+          <td>
+            <video width="320" height="180" controls>
+              <source src="{{ log.url }}" type="video/mp4">
+              브라우저가 video 태그를 지원하지 않습니다.
+            </video>
+              <!-- ✅ CSV 다운로드 버튼 -->
+              <a href="{{ log.csv_url }}" class="btn-download" download>
+                📥 CSV 다운로드
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>

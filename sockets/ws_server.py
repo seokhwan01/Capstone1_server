@@ -1,0 +1,443 @@
+# sockets/ws_server.py
+# -*- coding: utf-8 -*-
+import json
+import asyncio
+from datetime import datetime, timedelta
+
+import websockets
+from extensions import db
+from models.ambulance_log import AmbulanceLog
+from utils.car_utils import normalize_car_no
+from utils.crossroad_utils import (
+    load_crossroad_csv,
+    compute_crossroad_directions,
+    haversine,
+)
+from utils.video_recorder import VideoRecorder
+from utils.csv_logger import start_csv_logging, log_position, stop_csv_logging, set_eta_time
+
+# 차량별 비디오 레코더
+recorders: dict[str, VideoRecorder] = {}
+
+# 차량별 예상 교차로 (경로 기반 분석 결과)
+expected_crossroads: dict[str, list[dict]] = {}
+
+# 교차로 정보
+crossroad_df = load_crossroad_csv("static/crossroad_map/CrossroadMap.csv")
+
+# WebSocket 서버
+clients: set[websockets.WebSocketServerProtocol] = set()
+
+# ✅ 각 WebSocket 연결이 어떤 차량인지 매핑
+ws_car_map: dict[websockets.WebSocketServerProtocol, str] = {}
+
+
+async def broadcast_dict(data: dict):
+    if not clients:
+        return
+    msg = json.dumps(data, ensure_ascii=False)
+    await asyncio.gather(
+        *[c.send(msg) for c in list(clients)],
+        return_exceptions=True,
+    )
+
+
+async def ws_handler(websocket):
+    print("🔌 WebSocket Client Connected")
+    clients.add(websocket)
+
+    try:
+        async for msg in websocket:
+            try:
+                data = json.loads(msg)
+            except Exception as e:
+                print("⚠️ JSON 파싱 실패:", e, msg[:120])
+                continue
+
+            t = data.get("type")
+
+            if t != "video":
+                print("📥 WS 메시지 수신:", msg[:120])
+                print(f"📡 [WS 수신] type={t}, keys={list(data.keys())}")
+
+            # --------------------------------------------------
+            # 1) 출발 이벤트
+            # --------------------------------------------------
+            if t == "start":
+                try:
+                    car_no = data.get("car")
+                    start_time_str = data.get("start_time") or data.get("time")
+
+                    start_time = datetime.strptime(
+                        start_time_str, "%Y-%m-%d %H:%M:%S"
+                    )
+
+                    normalized_car_no = normalize_car_no(car_no)
+                    timestamp = start_time.strftime("%Y%m%d_%H%M%S")
+                    file_name = f"{normalized_car_no}_{timestamp}.mp4"
+
+                    log = AmbulanceLog(
+                        car_no=car_no,
+                        start_time=start_time,
+                        video_url=file_name,
+                    )
+                    db.session.merge(log)
+                    db.session.commit()
+
+                    print(f"✅ DB INSERT: {car_no}, 출발={start_time}, 파일명={file_name}")
+
+                    # VideoRecorder
+                    try:
+                        rec = VideoRecorder(car_no, start_time)
+                        recorders[car_no] = rec
+                        print(f"🎥 VideoRecorder 생성 완료: {car_no}")
+                    except Exception as e:
+                        print("❌ VideoRecorder 생성 실패:", e)
+
+                    # ✅ 이 WebSocket이 어떤 차량인지 매핑
+                    if car_no:
+                        ws_car_map[websocket] = car_no
+                        print(f"🔗 WebSocket ↔ 차량 매핑: {websocket} -> {car_no}")
+
+                    # CSV 로깅 시작
+                    try:
+                        start_csv_logging(car_no, start_time, eta_time=None)
+                    except Exception as e:
+                        print("⚠️ CSV start 실패:", e)
+
+                    out = {
+                        "event": "ambulance_start",
+                        **data,
+                    }
+                    await broadcast_dict(out)
+
+                except Exception as e:
+                    print("❌ start 처리 오류:", e)
+
+            # --------------------------------------------------
+            # 2) 도착 이벤트
+            # --------------------------------------------------
+            elif t == "arrival":
+                try:
+                    car_no = data.get("car")
+                    start_time_str = data.get("start_time")  # or latest 찾기
+                    arrival_time_str = data.get("arrival_time") or data.get("time")
+
+                    arrival_time = datetime.strptime(
+                        arrival_time_str, "%Y-%m-%d %H:%M:%S"
+                    )
+
+                    start_time = None
+
+                    if start_time_str:
+                        start_time = datetime.strptime(
+                            start_time_str, "%Y-%m-%d %H:%M:%S"
+                        )
+                        log = db.session.get(AmbulanceLog, (car_no, start_time))
+                    else:
+                        log = (
+                            db.session.query(AmbulanceLog)
+                            .filter(AmbulanceLog.car_no == car_no)
+                            .order_by(AmbulanceLog.start_time.desc())
+                            .first()
+                        )
+                        if log:
+                            start_time = log.start_time
+
+                    if log:
+                        log.arrival_time = arrival_time
+                        db.session.commit()
+                        print(f"✅ DB UPDATE(도착): {car_no}, 도착={arrival_time}")
+                    else:
+                        print("⚠️ 도착 로그 업데이트 대상 없음:", car_no)
+
+                    # VideoRecorder 종료
+                    rec = recorders.pop(car_no, None)
+                    if rec:
+                        print(f"🎥 {car_no} VideoRecorder 종료 및 업로드")
+                        rec.close_and_upload()
+                    else:
+                        print(f"⚠️ {car_no} 에 대한 VideoRecorder 없음")
+
+                    # CSV summary + 업로드
+                    try:
+                        stop_csv_logging(arrival_time)
+                    except Exception as e:
+                        print("⚠️ CSV stop 실패:", e)
+
+                    if car_no:
+                        expected_crossroads.pop(car_no, None)
+
+                    out = {
+                        "event": "ambulance_arrival",
+                        "car": car_no,
+                        "start_time": start_time.strftime("%Y-%m-%d %H:%M:%S") if start_time else None,
+                        "arrival_time": arrival_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                    await broadcast_dict(out)
+
+                except Exception as e:
+                    print("❌ arrival 처리 오류:", e)
+
+            # --------------------------------------------------
+            # 3) 경로 이벤트
+            # --------------------------------------------------
+            elif t == "route":
+                try:
+                    route_points = data.get("route_points") or data.get("path") or []
+                    norm_points = []
+                    for p in route_points:
+                        if isinstance(p, (list, tuple)) and len(p) >= 2:
+                            norm_points.append({"lat": float(p[0]), "lng": float(p[1])})
+                        elif isinstance(p, dict):
+                            norm_points.append(
+                                {
+                                    "lat": float(p.get("lat")),
+                                    "lng": float(p.get("lng")),
+                                }
+                            )
+
+                    data["route_points"] = norm_points
+
+                    print("🚑 경로 좌표 샘플:", norm_points[:2])
+
+                    car_no = data.get("car")
+
+                    # duration(초) → ETA 계산
+                    duration_sec = data.get("duration")
+
+                    if car_no and duration_sec is not None:
+                        try:
+                            log = (
+                                db.session.query(AmbulanceLog)
+                                .filter(AmbulanceLog.car_no == car_no)
+                                .order_by(AmbulanceLog.start_time.desc())
+                                .first()
+                            )
+
+                            if log and log.start_time:
+                                eta_time = log.start_time + timedelta(seconds=int(duration_sec))
+                                set_eta_time(eta_time)
+                                print(
+                                    f"🕒 ETA 설정 완료: car={car_no}, "
+                                    f"start={log.start_time}, duration={duration_sec}s, eta={eta_time}"
+                                )
+                            else:
+                                print("⚠️ ETA 계산용 start_time 로그를 찾지 못함:", car_no)
+                        except Exception as e:
+                            print("⚠️ ETA 계산/저장 실패:", e)
+
+                    if car_no:
+                        crossroads = compute_crossroad_directions(
+                            norm_points,
+                            crossroad_df,
+                            radius=50,
+                        )
+
+                        for c in crossroads:
+                            c["status"] = "pending"
+
+                        expected_crossroads[car_no] = crossroads
+
+                        print("🚦 예상 교차로 및 접근 방향:")
+                        for c in crossroads:
+                            print(
+                                f"  - {c['name']}: {c['explain']} "
+                                f"(진입={c['in_dir']} → 이탈={c['out_dir']}, turn={c['turn']})"
+                            )
+                    else:
+                        print("⚠️ route 데이터에 car 필드가 없음:", data)
+
+                    ack = {
+                        "type": "success",
+                        "status": "success",
+                    }
+                    await websocket.send(json.dumps(ack, ensure_ascii=False))
+
+                    out = {
+                        "event": "ambulance_route",
+                        **data,
+                    }
+                    await broadcast_dict(out)
+
+                    if car_no:
+                        await broadcast_dict(
+                            {
+                                "event": "ambulance_expected_crossroads",
+                                "car": car_no,
+                                "crossroads": expected_crossroads[car_no],
+                            }
+                        )
+
+                except Exception as e:
+                    print("⚠️ route 처리 오류:", e)
+                    err_msg = {
+                        "type": "error",
+                        "error": str(e),
+                    }
+                    await websocket.send(json.dumps(err_msg, ensure_ascii=False))
+
+            # --------------------------------------------------
+            # 4) 앰뷸런스 현재 위치
+            # --------------------------------------------------
+            elif t == "current":
+                print("🚑 current 수신:", data)
+                current = data.get("current", {})
+                lat = current.get("lat")
+                lon = current.get("lng")
+                speed = data.get("speed")
+                car_no = data.get("car")
+
+                if car_no and lat is not None and lon is not None:
+                    try:
+                        ts = datetime.now()
+                        log_position(
+                            ts,
+                            car_no,
+                            float(lat),
+                            float(lon),
+                            float(speed) if speed is not None else None,
+                        )
+                    except Exception as e:
+                        print("⚠️ CSV 위치 로그 실패:", e)
+
+                if lat is not None and lon is not None and car_no:
+                    try:
+                        lat_f, lon_f = float(lat), float(lon)
+
+                        crossroads = expected_crossroads.get(car_no, [])
+                        if not crossroads:
+                            print(
+                                f"🚦 차량 {car_no}에 대해 저장된 expected_crossroads 없음"
+                            )
+                        else:
+                            for c in crossroads:
+                                d = haversine(lat_f, lon_f, c["lat"], c["lon"])
+
+                                if c["status"] == "pending" and d <= 300:
+                                    print(
+                                        f"⚠️ 교차로 접근 알림: {c['name']} "
+                                        f"(진입={c['in_dir']} → 이탈={c['out_dir']}, "
+                                        f"turn={c['turn']}, 거리={d:.1f}m)"
+                                    )
+                                    c["status"] = "approaching"
+
+                                    await broadcast_dict(
+                                        {
+                                            "event": "ambulance_crossroad_approach",
+                                            "car": car_no,
+                                            "crossroad_id": c["id"],
+                                            "crossroad_name": c["name"],
+                                            "turn": c.get("turn"),
+                                            "in_dir": c.get("in_dir"),
+                                            "out_dir": c.get("out_dir"),
+                                            "explain": c.get("explain"),
+                                            "distance": round(d, 1),
+                                            "timestamp": datetime.now().isoformat(),
+                                        }
+                                    )
+
+                                elif c["status"] == "approaching" and d <= 50:
+                                    print(f"🚦 교차로 도착: {c['name']} (거리={d:.1f}m)")
+                                    c["status"] = "arrived"
+
+                                    await broadcast_dict(
+                                        {
+                                            "event": "ambulance_crossroad_arrived",
+                                            "car": car_no,
+                                            "crossroad_id": c["id"],
+                                            "crossroad_name": c["name"],
+                                            "distance": round(d, 1),
+                                            "timestamp": datetime.now().isoformat(),
+                                        }
+                                    )
+
+                                elif c["status"] == "arrived" and d > 50:
+                                    print(f"✅ 교차로 통과 완료: {c['name']}")
+                                    c["status"] = "passed"
+
+                                    await broadcast_dict(
+                                        {
+                                            "event": "ambulance_crossroad_passed",
+                                            "car": car_no,
+                                            "crossroad_id": c["id"],
+                                            "crossroad_name": c["name"],
+                                            "distance": round(d, 1),
+                                            "timestamp": datetime.now().isoformat(),
+                                        }
+                                    )
+
+                    except Exception as e:
+                        print("⚠️ 교차로/거리 계산 오류:", e)
+                else:
+                    print("⚠️ current 좌표 또는 car 번호 없음:", data)
+
+                out = {
+                    "event": "ambulance_current",
+                    **data,
+                }
+                await broadcast_dict(out)
+
+            # --------------------------------------------------
+            # 5) 일반 차량 현재 위치
+            # --------------------------------------------------
+            elif t == "normal_current":
+                print("🚗 일반 차량 현재 위치 수신:", data)
+                out = {
+                    "event": "normalcar_current",
+                    **data,
+                }
+                await broadcast_dict(out)
+
+            # --------------------------------------------------
+            # 6) 영상 프레임
+            # --------------------------------------------------
+            elif t == "video":
+                car_no = data.get("car")
+                frame_b64 = data.get("frame")
+
+                # ✅ 메시지에 car가 없으면 WebSocket 매핑에서 가져오기
+                if not car_no:
+                    car_no = ws_car_map.get(websocket)
+                    # print(f"[video] car_no가 None이라 ws_car_map에서 가져옴 → {car_no}")
+
+                if not car_no:
+                    # print("[video] ⚠ car_no를 찾을 수 없음 (메시지에도 없고 ws_car_map에도 없음)")
+                    continue
+
+                if frame_b64:
+                    out = {
+                        "event": "video",
+                        "car": car_no,
+                        "frame": frame_b64,
+                    }
+                    await broadcast_dict(out)
+                    # print("ws.server 비디오 rec전~~~~~~")
+                    # print(f"[video] car_no={car_no}, recorders.keys={list(recorders.keys())}")
+                    rec = recorders.get(car_no)
+                    if rec:
+                        # print("ws.server 읽기 함수 호출~~~~~~~")
+                        rec.write_frame_b64(frame_b64)
+                    else:
+                        pass
+                        # print(f"[video] ⚠️ recorder 없음 for car={car_no}")
+
+            else:
+                print(f"❓ 알 수 없는 type 수신: {t}, data={data}")
+
+    except websockets.exceptions.ConnectionClosed:
+        print("❌ WebSocket Client Disconnected")
+    finally:
+        clients.remove(websocket)
+        ws_car_map.pop(websocket, None)  # ✅ 연결 끊길 때 매핑 제거
+
+
+async def ws_main():
+    print("🌐 WebSocket Server running ws://0.0.0.0:5000")
+    async with websockets.serve(ws_handler, "0.0.0.0", 5000, ping_interval=None):
+        await asyncio.Future()  # run forever
+
+
+def start_ws_server():
+    print("🔧 WebSocket Server starting...")
+    asyncio.run(ws_main())
