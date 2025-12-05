@@ -115,3 +115,25 @@ nav a {
 #button-section .btn:hover {
   background: #45A049; /* hover 시 약간 더 진한 초록 */
 }
+
+.btn-download {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: #2d6cdf;
+  color: white;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.btn-download.disabled {
+  background: #aaa;
+  cursor: not-allowed;
+}
+.log-actions {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
