@@ -6,11 +6,14 @@ from datetime import datetime
 
 from flask import Blueprint, render_template, send_file, abort
 from models.ambulance_log import AmbulanceLog
-from botocore.exceptions import ClientError  # ✅ 에러 타입
+from botocore.exceptions import ClientError
+
+# ✅ 차량번호 → 안전 문자열 변환 (한글 → 영문화, 특수문자 → _)
+from utils.car_utils import normalize_car_no
 
 bp = Blueprint("video", __name__)
 
-# ✅ AWS S3 클라이언트 (진짜 서비스에선 환경변수로 빼는 거 강력 추천... 지금 이 키는 빨리 비활성화하는 게 좋음)
+# ✅ AWS S3 클라이언트 (실서비스에선 env로 빼기)
 s3 = boto3.client(
     "s3",
     aws_access_key_id="AKIAQOAKFOWUA3FXVWU5",
@@ -41,11 +44,13 @@ def video_logs():
         except ClientError:
             csv_url = None
 
+        start_ts = log.start_time.strftime("%Y%m%d_%H%M%S")
+
         video_logs.append({
-            # 🔹 템플릿에서 ZIP 라우트 호출할 때 쓸 값들
-            "car_no": log.car_no,
-            "start_time": log.start_time,  # 필요하면 템플릿에서 그대로 쓰려고 같이 넘겨줌
-            "start_ts": log.start_time.strftime("%Y%m%d_%H%M%S"),  # URL용
+            # 🔹 ZIP 라우트에서 쓸 값
+            "car_no": log.car_no,          # 원본 차량번호 (DB 그대로)
+            "start_time": log.start_time,
+            "start_ts": start_ts,          # URL용 (YYYYMMDD_HHMMSS)
 
             # 🔹 화면 출력용
             "vehicle_id": log.car_no,
@@ -57,21 +62,25 @@ def video_logs():
         })
 
     return render_template("video_logs.html", video_logs=video_logs)
+
+
 def _list_image_keys_for_log(car_no: str, start_time) -> list[str]:
     """
     한 출동 건에 대한 S3 이미지 key 목록
-    car_no 예: '119다 119'
-    start_time: datetime
+    - yolo_worker 저장 패턴:
+      images/{normalize_car_no(car_no)}_track{N}_YYYYMMDD_HHMMSS.jpg
     """
-    # 👉 YOLO/자동신고 쪽에서 실제로 어떤 폴더에 저장하는지 여기에 맞추면 됨
     dt = start_time
     start_str = dt.strftime("%Y%m%d_%H%M%S")
 
-    # 예: images/119다119_20251205_010203/...
-    safe_car_no = car_no.replace(" ", "")
-    prefix = f"images/{safe_car_no}_{start_str}/"
+    # ✅ 차량번호를 S3 경로용으로 normalize
+    safe_car_no = normalize_car_no(car_no)
 
-    keys = []
+    # 예: images/119da119_track1_20251205_151827.jpg
+    # → 앞부분 공통 prefix: images/119da119_track
+    prefix = f"images/{safe_car_no}_track"
+
+    keys: list[str] = []
     continuation_token = None
 
     while True:
@@ -88,7 +97,11 @@ def _list_image_keys_for_log(car_no: str, start_time) -> list[str]:
         for obj in contents:
             key = obj["Key"]
             lower = key.lower()
-            if lower.endswith(".jpg") or lower.endswith(".jpeg") or lower.endswith(".png"):
+
+            # 끝이 _YYYYMMDD_HHMMSS.(jpg|jpeg|png) 인 애들만 (해당 출동)
+            if lower.endswith(f"_{start_str}.jpg") or \
+               lower.endswith(f"_{start_str}.jpeg") or \
+               lower.endswith(f"_{start_str}.png"):
                 keys.append(key)
 
         if resp.get("IsTruncated"):
@@ -102,8 +115,8 @@ def _list_image_keys_for_log(car_no: str, start_time) -> list[str]:
 @bp.route("/video_logs/<string:car_no>/<string:start_ts>/images.zip")
 def download_images_zip(car_no, start_ts):
     """
-    car_no: URL 인코딩된 차량번호 (공백 등 포함 가능)
-    start_ts: YYYYMMDD_HHMMSS
+    car_no : URL에서 넘어온 차량번호 (원본, DB에 있는 값)
+    start_ts : 'YYYYMMDD_HHMMSS'
     """
     # 1) URL의 start_ts를 datetime으로 변환
     try:
@@ -111,7 +124,7 @@ def download_images_zip(car_no, start_ts):
     except ValueError:
         abort(400, description="잘못된 시간 형식입니다.")
 
-    # 2) DB에서 해당 출동 로그 찾기
+    # 2) DB에서 해당 출동 로그 찾기 (PK = car_no + start_time)
     log = AmbulanceLog.query.filter_by(car_no=car_no, start_time=start_dt).first()
     if not log:
         abort(404, description="해당 출동 로그를 찾을 수 없습니다.")
@@ -132,8 +145,8 @@ def download_images_zip(car_no, start_ts):
 
     mem_file.seek(0)
 
-    # 5) 다운로드 파일명
-    safe_car_no = log.car_no.replace(" ", "")
+    # 5) 다운로드 파일명 (보기 좋게 normalize 써도 되고, 원본 써도 됨)
+    safe_car_no = normalize_car_no(log.car_no)
     download_name = f"{safe_car_no}_{start_ts}.zip"
 
     return send_file(

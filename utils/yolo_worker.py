@@ -14,6 +14,8 @@ import cv2
 import numpy as np
 import torch
 from ultralytics import YOLO
+# ✅ 차량번호 안전 문자열 변환
+from utils.car_utils import normalize_car_no
 
 # ✅ S3 클라이언트
 from s3_client import s3, bucket_name
@@ -206,17 +208,23 @@ def _worker_loop():
                             bx1, by1, bx2, by2 = _last_bbox[key]
 
                             cv2.rectangle(save_img, (bx1, by1), (bx2, by2),
-                                          (0, 0, 255), 4)
+                                        (0, 0, 255), 4)
 
-                            filename = f"{car_no}_track{track_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                            # ✅ 차량번호를 S3/파일시스템용 안전 문자열로 변환
+                            safe_car_no = normalize_car_no(car_no)
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+                            # ✅ 저장/업로드용 파일명: 예) 119da119_track1_20251205_151827.jpg
+                            filename = f"{safe_car_no}_track{track_id}_{timestamp}.jpg"
+
                             # ✅ 로컬 저장 경로
                             save_path = os.path.join(IMAGE_DIR, filename)
                             cv2.imwrite(save_path, save_img)
                             print(f"🚨 [{car_no}] 차량 이미지 로컬 저장됨:", save_path)
 
-                            # ✅ S3 업로드
+                            # ✅ S3 업로드 (키에도 safe_car_no 사용)
                             try:
-                                s3_key = f"{S3_IMAGE_PREFIX}/{filename}"  # images/xxx.jpg
+                                s3_key = f"{S3_IMAGE_PREFIX}/{filename}"  # images/119da119_track1_...
                                 s3.upload_file(
                                     save_path,
                                     bucket_name,
@@ -230,6 +238,7 @@ def _worker_loop():
                             _saved_ids.add(key)
                             _in_center_time[key] = 0.0
                             _best_score[key] = 0.0
+
 
                     _last_timestamp[key] = now
 
