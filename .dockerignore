@@ -1,0 +1,15 @@
+.git
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 로그/결과물/영상은 이미지에 안 넣기
+logs/
+videos/
+report_images/
+*.csv
+*.mp4
+*.avi
+*.jpg
+*.jpeg

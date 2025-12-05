@@ -1,0 +1,32 @@
+# --- 서버 기본 ---
+Flask==3.1.2
+Flask-SQLAlchemy==3.1.1
+SQLAlchemy==2.0.44
+Werkzeug==3.1.3
+websockets==15.0.1
+
+# --- AWS S3 연동 ---
+boto3==1.42.2
+
+# --- 데이터/수학 ---
+numpy==2.2.5
+pandas==2.3.3
+scipy==1.15.3
+polars==1.35.2
+
+# --- 시각화/유틸 ---
+matplotlib==3.10.7
+psutil==7.1.3
+requests==2.32.5
+PyYAML==6.0.3
+lap==0.5.12
+
+# --- OpenCV / 영상 ---
+opencv-python==4.12.0
+opencv-python-headless==4.12.0
+
+# --- YOLO / 딥러닝 ---
+torch==2.9.1
+torchvision==0.24.1
+ultralytics==8.3.235
+ultralytics-thop==2.0.18
