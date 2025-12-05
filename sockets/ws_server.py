@@ -16,7 +16,7 @@ from utils.crossroad_utils import (
 from utils.video_recorder import VideoRecorder
 from utils.csv_logger import start_csv_logging, log_position, stop_csv_logging, set_eta_time
 # 🔽 YOLO 워커 관련 추가
-from utils.yolo_worker import start_yolo_worker, enqueue_frame, update_car_gps
+from utils.yolo_worker import start_yolo_worker, enqueue_frame, update_car_gps,set_run_start_time
 
 # 차량별 비디오 레코더
 recorders: dict[str, VideoRecorder] = {}
@@ -108,6 +108,13 @@ async def ws_handler(websocket):
                         start_csv_logging(car_no, start_time, eta_time=None)
                     except Exception as e:
                         print("⚠️ CSV start 실패:", e)
+
+                    # 🔥 YOLO 워커 출동 시작 시간 설정 (여기가 핵심)
+                    try:
+                        set_run_start_time(car_no, start_time)
+                    except Exception as e:
+                        print("⚠️ YOLO set_run_start_time 실패:", e)
+
 
                     out = {
                         "event": "ambulance_start",

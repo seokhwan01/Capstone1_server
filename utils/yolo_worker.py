@@ -56,8 +56,8 @@ _saved_ids: set[tuple[str, int]] = set()
 _worker_started = False
 _worker_thread: threading.Thread | None = None
 
-# 프레임 샘플링
-_FRAME_SKIP = 3
+# 프레임 샘플링 (1이면 스킵 없음)
+_FRAME_SKIP = 1
 _frame_counter = 0
 
 # 🔽 저장할 이미지 해상도 (너무 크지 않게)
@@ -118,6 +118,17 @@ def set_run_start_time(car_no: str, start_time: datetime):
     _car_start_ts[car_no] = ts
     print(f"[YOLO 워커] set_run_start_time car={car_no}, ts={ts}")
 
+    # 🔄 이 차량에 대한 이전 추적 상태 초기화
+    keys_to_clear = [k for k in _in_center_time.keys() if k[0] == car_no]
+
+    for k in keys_to_clear:
+        _in_center_time.pop(k, None)
+        _best_frame.pop(k, None)
+        _best_score.pop(k, None)
+        _last_timestamp.pop(k, None)
+        _last_bbox.pop(k, None)
+        _saved_ids.discard(k)
+
 
 def enqueue_frame(car_no: str, frame_b64: str):
     """
@@ -129,7 +140,7 @@ def enqueue_frame(car_no: str, frame_b64: str):
 
     _frame_counter += 1
 
-    # 프레임 샘플링
+    # 프레임 샘플링 (_FRAME_SKIP=1이면 스킵 없음)
     if _frame_counter % _FRAME_SKIP != 0:
         return
 
@@ -155,8 +166,57 @@ def start_yolo_worker():
 
     _worker_thread = threading.Thread(target=_worker_loop, daemon=True)
     _worker_thread.start()
-    _worker_started = True    # 순서 살짝 수정
+    _worker_started = True
     print("🧠 YOLO 워커 스레드 시작됨")
+
+
+# ---------- 내부 유틸: IoU 기반 기존 트랙 매칭 ----------
+
+def _find_match_key_for_new_box(
+    car_no: str,
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    iou_thresh: float = 0.5,
+) -> tuple[str, int] | None:
+    """
+    새 박스가 들어왔을 때, 같은 차량(car_no)에 대해
+    이전 bbox들과 IoU를 비교해서 충분히 겹치는 트랙이 있으면 그 key를 반환.
+    없으면 None.
+    """
+    best_key = None
+    best_iou = 0.0
+
+    for (c, tid), (ox1, oy1, ox2, oy2) in _last_bbox.items():
+        if c != car_no:
+            continue
+
+        # 교집합
+        inter_x1 = max(x1, ox1)
+        inter_y1 = max(y1, oy1)
+        inter_x2 = min(x2, ox2)
+        inter_y2 = min(y2, oy2)
+
+        inter_w = max(0, inter_x2 - inter_x1)
+        inter_h = max(0, inter_y2 - inter_y1)
+        inter_area = inter_w * inter_h
+        if inter_area <= 0:
+            continue
+
+        # 합집합
+        area_new = (x2 - x1) * (y2 - y1)
+        area_old = (ox2 - ox1) * (oy2 - oy1)
+        union_area = area_new + area_old - inter_area
+        if union_area <= 0:
+            continue
+
+        iou = inter_area / union_area
+        if iou > iou_thresh and iou > best_iou:
+            best_iou = iou
+            best_key = (c, tid)
+
+    return best_key
 
 
 # ---------- 내부 워커 루프 ----------
@@ -250,10 +310,36 @@ def _worker_loop():
 
                     key = (car_no, track_id)
 
+                    # 🔗 새 트랙인데, 이전 박스와 많이 겹치면 상태 이어받기
                     if key not in _in_center_time:
-                        _in_center_time[key] = 0.0
-                        _best_score[key] = 0.0
-                        _last_timestamp[key] = now
+                        match_key = _find_match_key_for_new_box(
+                            car_no, x1, y1, x2, y2, iou_thresh=0.5
+                        )
+
+                        if match_key is not None:
+                            # 이전 키의 상태를 새 키로 옮기기
+                            _in_center_time[key] = _in_center_time.pop(match_key, 0.0)
+                            _best_score[key] = _best_score.pop(match_key, 0.0)
+                            if match_key in _best_frame:
+                                _best_frame[key] = _best_frame.pop(match_key)
+                            _last_timestamp[key] = _last_timestamp.pop(match_key, now)
+                            _last_bbox[key] = (x1, y1, x2, y2)
+
+                            if match_key in _saved_ids:
+                                _saved_ids.add(key)
+                                _saved_ids.discard(match_key)
+
+                            print(
+                                f"[YOLO 워커] 🔗 ID 머지: {match_key} → {key} (IoU 기반)"
+                            )
+                        else:
+                            # 완전히 새로운 트랙
+                            _in_center_time[key] = 0.0
+                            _best_score[key] = 0.0
+                            _last_timestamp[key] = now
+                            _last_bbox[key] = (x1, y1, x2, y2)
+                    else:
+                        # 기존 트랙이면 bbox/타임스탬프 업데이트
                         _last_bbox[key] = (x1, y1, x2, y2)
 
                     print(
@@ -263,10 +349,10 @@ def _worker_loop():
                     )
 
                     if is_center:
-                        _in_center_time[key] += now - _last_timestamp[key]
+                        _in_center_time[key] += now - _last_timestamp.get(key, now)
 
                         # 품질(신뢰도) 가장 좋은 프레임 저장
-                        if conf > _best_score[key]:
+                        if conf > _best_score.get(key, 0.0):
                             _best_score[key] = conf
                             _best_frame[key] = raw_frame.copy()
                             _last_bbox[key] = (x1, y1, x2, y2)
@@ -305,8 +391,6 @@ def _worker_loop():
                                     start_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
                                 # ➜ images/{safe_car}_track{ID}_{start_ts}.jpg
-                                #    (routes/video.py 의 _list_image_keys_for_log에서
-                                #     이 패턴을 가정하고 있음)
                                 filename = f"{safe_car_no}_track{track_id}_{start_ts}.jpg"
                                 s3_key = f"{S3_IMAGE_PREFIX}/{filename}"
 
