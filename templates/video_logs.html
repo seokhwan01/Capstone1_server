@@ -59,14 +59,21 @@
                   </span>
                 {% endif %}
 
-                {# ✅ 이미지 ZIP 다운로드 버튼 (car_no + start_ts로 라우트 연결) #}
-                <a href="{{ url_for('video.download_images_zip',
-                                    car_no=log.car_no,
-                                    start_ts=log.start_ts) }}"
-                   class="btn-download">
-                  🗂 이미지 ZIP 다운로드
-                </a>
+                {# ✅ 이미지: 있으면 ZIP 버튼, 없으면 "신고 사항 없음" #}
+                {% if log.has_images %}
+                  <a href="{{ url_for('video.download_images_zip',
+                                      car_no=log.car_no,
+                                      start_ts=log.start_ts) }}"
+                     class="btn-download">
+                    🗂 신고 이미지 ZIP 다운로드
+                  </a>
+                {% else %}
+                  <span class="no-report-text">
+                    신고 사항 없음
+                  </span>
+                {% endif %}
               </div>
+
             </div>
           </td>
         </tr>

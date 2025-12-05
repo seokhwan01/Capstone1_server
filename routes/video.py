@@ -46,19 +46,26 @@ def video_logs():
 
         start_ts = log.start_time.strftime("%Y%m%d_%H%M%S")
 
-        video_logs.append({
-            # 🔹 ZIP 라우트에서 쓸 값
-            "car_no": log.car_no,          # 원본 차량번호 (DB 그대로)
-            "start_time": log.start_time,
-            "start_ts": start_ts,          # URL용 (YYYYMMDD_HHMMSS)
+        # ✅ 이미지 존재 여부 확인
+        try:
+            image_keys = _list_image_keys_for_log(log.car_no, log.start_time)
+            has_images = len(image_keys) > 0
+        except ClientError:
+            has_images = False
 
-            # 🔹 화면 출력용
+        video_logs.append({
+            "car_no": log.car_no,
+            "start_time": log.start_time,
+            "start_ts": start_ts,
+
             "vehicle_id": log.car_no,
             "time": log.start_time.strftime("%Y-%m-%d %H:%M:%S"),
 
-            # 🔹 S3 URL
             "url": f"{S3_BASE_URL}/{video_key}",
             "csv_url": csv_url,
+
+            # 🔹 템플릿에서 쓸 플래그
+            "has_images": has_images,
         })
 
     return render_template("video_logs.html", video_logs=video_logs)
