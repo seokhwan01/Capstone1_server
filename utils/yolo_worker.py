@@ -88,7 +88,7 @@ def _upload_bytes_to_s3_with_retry(
                 ContentType=content_type,
             )
             print(
-                f"✅ S3 업로드 성공({attempt}/{retries}) → "
+                f"✅ 자동 신고 찰영 "
                 f"https://{bucket_name}.s3.us-east-1.amazonaws.com/{s3_key}"
             )
             return True

@@ -84,6 +84,7 @@ function renderTableFromCache() {
 document.addEventListener("DOMContentLoaded", () => {
   localStorage.removeItem(STORAGE_KEY);  // ← 이 줄 추가
   logCache = loadCache();
+  console.log("📂 vehicle_log 복원:", logCache);
   renderTableFromCache();
 });
 

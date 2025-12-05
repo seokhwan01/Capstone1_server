@@ -122,10 +122,10 @@ class VideoRecorder:
             if self.writer and self.writer.isOpened():
                 self.writer.write(resized)
                 self.frame_count += 1
-                print(
-                    f"[VideoRecorder] ✅ 프레임 기록 "
-                    f"(count={self.frame_count}, src={w}x{h}, dst={VIDEO_W}x{VIDEO_H})"
-                )
+                # print(
+                #     f"[VideoRecorder] ✅ 프레임 기록 "
+                #     f"(count={self.frame_count}, src={w}x{h}, dst={VIDEO_W}x{VIDEO_H})"
+                # )
 
         except Exception as e:
             print("[VideoRecorder] ❌ write_frame_b64 오류:", e)
