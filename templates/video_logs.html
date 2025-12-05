@@ -1,33 +1,41 @@
 <tbody>
   {% for log in video_logs %}
   <tr>
-    <td>{{ log.vehicle_id }}</td>
-    <td>{{ log.time }}</td>
-    <td>
-      <video width="320" height="180" controls>
-        <source src="{{ log.url }}" type="video/mp4">
-        브라우저가 video 태그를 지원하지 않습니다.
-      </video>
+    <td class="log-col-vehicle">
+      {{ log.vehicle_id }}
+    </td>
 
-      <div class="log-actions">
-        {# ✅ CSV 있을 때만 다운로드 버튼 노출 #}
-        {% if log.csv_url %}
-          <a href="{{ log.csv_url }}" class="btn-download" download>
-            📥 CSV 다운로드
+    <td class="log-col-time">
+      {{ log.time }}
+    </td>
+
+    <td class="log-col-video">
+      <div class="log-video-wrapper">
+        <video class="log-video" width="320" height="180" controls>
+          <source src="{{ log.url }}" type="video/mp4">
+          브라우저가 video 태그를 지원하지 않습니다.
+        </video>
+
+        <div class="log-actions">
+          {# ✅ CSV 있을 때만 다운로드 버튼 노출 #}
+          {% if log.csv_url %}
+            <a href="{{ log.csv_url }}" class="btn-download" download>
+              📥 CSV 다운로드
+            </a>
+          {% else %}
+            <span class="btn-download disabled">
+              CSV 없음
+            </span>
+          {% endif %}
+
+          {# ✅ 이미지 ZIP 다운로드 버튼 (car_no + start_ts로 라우트 연결) #}
+          <a href="{{ url_for('video.download_images_zip',
+                              car_no=log.car_no,
+                              start_ts=log.start_ts) }}"
+             class="btn-download">
+            🗂 이미지 ZIP 다운로드
           </a>
-        {% else %}
-          <button class="btn-download disabled" disabled>
-            CSV 없음
-          </button>
-        {% endif %}
-
-        {# ✅ 이미지 ZIP 다운로드 버튼 (car_no + start_ts로 라우트 연결) #}
-        <a href="{{ url_for('video.download_images_zip',
-                            car_no=log.car_no,
-                            start_ts=log.start_ts) }}"
-           class="btn-download">
-          🗂 이미지 ZIP 다운로드
-        </a>
+        </div>
       </div>
     </td>
   </tr>
