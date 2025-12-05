@@ -4,10 +4,11 @@
   padding: 0;
   box-sizing: border-box;
 }
+
 body {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  min-height: 100vh;
   font-family: sans-serif;
   background: #f4f4f9;
 }
@@ -19,18 +20,43 @@ header {
   padding: 15px;
   text-align: center;
 }
+
+header h1 {
+  margin-bottom: 8px;
+}
+
 nav a {
   color: white;
   margin: 0 10px;
   text-decoration: none;
+  font-weight: 500;
 }
 
-/* 대시보드 레이아웃 */
+nav a:hover {
+  text-decoration: underline;
+}
+
+/* 페이지 공통 main 영역 */
+.page-main {
+  padding: 20px;
+}
+
+.page-main h2 {
+  margin-bottom: 8px;
+}
+
+.page-main p {
+  margin-bottom: 16px;
+  color: #555;
+}
+
+/* 대시보드 레이아웃 (기존) */
 #top-section {
   display: flex;
   flex: 7;
   min-height: 0;
 }
+
 #video-section,
 #map_div {
   flex: 1;
@@ -38,6 +64,7 @@ nav a {
   justify-content: center;
   align-items: center;
 }
+
 .video-feed {
   width: 90%;
   max-width: 100%;
@@ -46,29 +73,35 @@ nav a {
   border-radius: 8px;
   max-height: 90%;
 }
+
 #map_div {
   height: 100%;
 }
+
 #log-section {
   flex: 3;
   overflow-y: auto;
   padding: 10px 20px;
   background-color: #f9f9f9;
 }
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
 }
+
 .data-table th,
 .data-table td {
   padding: 10px;
   border: 1px solid #ddd;
   text-align: left;
 }
+
 .data-table th {
   background-color: #4CAF50; /* 밝은 초록 */
   color: white;
 }
+
 .data-table tr:nth-child(even) {
   background-color: #E8F5E9; /* 연한 초록 */
 }
@@ -78,22 +111,29 @@ nav a {
   width: 100%;
   border-collapse: collapse;
   margin-top: 20px;
+  background: white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  border-radius: 8px;
+  overflow: hidden;
 }
+
 .log-table th, 
 .log-table td {
   border: 1px solid #ddd;
   padding: 10px;
   text-align: center;
 }
+
 .log-table th {
   background: #4CAF50; /* 밝은 초록 */
   color: white;
 }
+
 .log-table tr:nth-child(even) {
   background-color: #E8F5E9; /* 연한 초록 */
 }
 
-/* 버튼 영역 (화면 아래 중앙 고정) */
+/* 버튼 영역 (대시보드 하단 공통) */
 #button-section {
   position: fixed;
   bottom: 20px;
@@ -101,6 +141,7 @@ nav a {
   transform: translateX(-50%);
   text-align: center;
 }
+
 #button-section .btn {
   display: inline-block;
   background: #4CAF50; /* 밝은 초록 */
@@ -112,38 +153,19 @@ nav a {
   font-size: 14px;
   transition: background 0.2s ease-in-out;
 }
+
 #button-section .btn:hover {
   background: #45A049; /* hover 시 약간 더 진한 초록 */
 }
 
-.btn-download {
-  display: inline-block;
-  margin-top: 4px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  background: #2d6cdf;
-  color: white;
-  text-decoration: none;
-  font-size: 0.9rem;
-}
-
-.btn-download.disabled {
-  background: #aaa;
-  cursor: not-allowed;
-}
-.log-actions {
-  margin-top: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
+/* 비디오 로그 안의 비디오 + 버튼 레이아웃 */
 .log-col-vehicle,
 .log-col-time,
 .log-col-video {
   vertical-align: middle;
 }
 
+/* 비디오 + 버튼 감싸는 래퍼 */
 .log-video-wrapper {
   display: flex;
   flex-direction: column;
@@ -151,6 +173,7 @@ nav a {
   gap: 8px;
 }
 
+/* 실제 video 태그 스타일 */
 .log-video {
   width: 100%;
   max-width: 360px;
@@ -168,6 +191,7 @@ nav a {
   flex-wrap: wrap;
 }
 
+/* CSV / ZIP 공통 버튼 */
 .btn-download {
   display: inline-block;
   padding: 6px 10px;
@@ -177,6 +201,7 @@ nav a {
   text-decoration: none;
   font-size: 0.85rem;
   border: none;
+  cursor: pointer;
 }
 
 .btn-download:hover {

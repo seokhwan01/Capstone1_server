@@ -1,43 +1,78 @@
-<tbody>
-  {% for log in video_logs %}
-  <tr>
-    <td class="log-col-vehicle">
-      {{ log.vehicle_id }}
-    </td>
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>비디오 로그</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
 
-    <td class="log-col-time">
-      {{ log.time }}
-    </td>
+<body>
+  <header>
+    <h1>긴급차량 관제 시스템</h1>
+    <nav>
+      <a href="{{ url_for('dashboard.dashboard') }}">대시보드</a>
+      <a href="{{ url_for('video.video_logs') }}">비디오 로그</a>
+      <a href="{{ url_for('auth.logout') }}">로그아웃</a>
+    </nav>
+  </header>
 
-    <td class="log-col-video">
-      <div class="log-video-wrapper">
-        <video class="log-video" width="320" height="180" controls>
-          <source src="{{ log.url }}" type="video/mp4">
-          브라우저가 video 태그를 지원하지 않습니다.
-        </video>
+  <main class="page-main">
+    <h2>비디오 로그 페이지</h2>
+    <p>긴급차량 출동 영상 기록을 확인할 수 있습니다.</p>
 
-        <div class="log-actions">
-          {# ✅ CSV 있을 때만 다운로드 버튼 노출 #}
-          {% if log.csv_url %}
-            <a href="{{ log.csv_url }}" class="btn-download" download>
-              📥 CSV 다운로드
-            </a>
-          {% else %}
-            <span class="btn-download disabled">
-              CSV 없음
-            </span>
-          {% endif %}
+    <table class="log-table">
+      <thead>
+        <tr>
+          <th>차량 ID</th>
+          <th>출동 시간</th>
+          <th>영상 / 파일</th>
+        </tr>
+      </thead>
 
-          {# ✅ 이미지 ZIP 다운로드 버튼 (car_no + start_ts로 라우트 연결) #}
-          <a href="{{ url_for('video.download_images_zip',
-                              car_no=log.car_no,
-                              start_ts=log.start_ts) }}"
-             class="btn-download">
-            🗂 이미지 ZIP 다운로드
-          </a>
-        </div>
-      </div>
-    </td>
-  </tr>
-  {% endfor %}
-</tbody>
+      <tbody>
+        {% for log in video_logs %}
+        <tr>
+          <td class="log-col-vehicle">
+            {{ log.vehicle_id }}
+          </td>
+
+          <td class="log-col-time">
+            {{ log.time }}
+          </td>
+
+          <td class="log-col-video">
+            <div class="log-video-wrapper">
+              <video class="log-video" width="320" height="180" controls>
+                <source src="{{ log.url }}" type="video/mp4">
+                브라우저가 video 태그를 지원하지 않습니다.
+              </video>
+
+              <div class="log-actions">
+                {# ✅ CSV 있을 때만 다운로드 버튼 노출 #}
+                {% if log.csv_url %}
+                  <a href="{{ log.csv_url }}" class="btn-download" download>
+                    📥 CSV 다운로드
+                  </a>
+                {% else %}
+                  <span class="btn-download disabled">
+                    CSV 없음
+                  </span>
+                {% endif %}
+
+                {# ✅ 이미지 ZIP 다운로드 버튼 (car_no + start_ts로 라우트 연결) #}
+                <a href="{{ url_for('video.download_images_zip',
+                                    car_no=log.car_no,
+                                    start_ts=log.start_ts) }}"
+                   class="btn-download">
+                  🗂 이미지 ZIP 다운로드
+                </a>
+              </div>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>
