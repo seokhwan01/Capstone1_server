@@ -51,7 +51,7 @@
                 {# ✅ CSV 있을 때만 다운로드 버튼 노출 #}
                 {% if log.csv_url %}
                   <a href="{{ log.csv_url }}" class="btn-download" download>
-                    📥 CSV 다운로드
+                    CSV 다운로드
                   </a>
                 {% else %}
                   <span class="btn-download disabled">
@@ -65,7 +65,7 @@
                                       car_no=log.car_no,
                                       start_ts=log.start_ts) }}"
                      class="btn-download">
-                    🗂 신고 이미지 ZIP 다운로드
+                    신고 이미지 ZIP 다운로드
                   </a>
                 {% else %}
                   <span class="no-report-text">

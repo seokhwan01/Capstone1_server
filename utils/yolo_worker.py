@@ -22,12 +22,18 @@ from s3_client import s3, bucket_name
 CENTER_MIN = 0.4
 CENTER_MAX = 0.6
 
+# 최소 confidence 기준
+CONF_THRESHOLD = 0.6
+
 # 👉 디버그용 폴더 (실제 JPG는 저장 안 하지만, 필요하면 찍어볼 때 사용)
 IMAGE_DIR = os.path.abspath("report_images")
 S3_IMAGE_PREFIX = "images"
 
 _frame_queue: "queue.Queue[tuple[str, str, float | None, float | None]]" = queue.Queue(maxsize=200)
 _last_gps: dict[str, tuple[float | None, float | None]] = {}
+
+# 🔹 각 차량별 출동 시작 시각 (문자열 "YYYYMMDD_HHMM%S")
+_car_start_ts: dict[str, str] = {}
 
 # 🔥 GPU / CPU 선택
 if torch.cuda.is_available():
@@ -53,9 +59,6 @@ _worker_thread: threading.Thread | None = None
 # 프레임 샘플링
 _FRAME_SKIP = 3
 _frame_counter = 0
-
-# 최소 confidence 기준
-CONF_THRESHOLD = 0.6
 
 # 🔽 저장할 이미지 해상도 (너무 크지 않게)
 SAVE_W = 640
@@ -104,6 +107,18 @@ def update_car_gps(car_no: str, lat: float | None, lng: float | None):
     _last_gps[car_no] = (lat, lng)
 
 
+def set_run_start_time(car_no: str, start_time: datetime):
+    """
+    출동이 시작될 때(ambulance_start) 호출해서
+    해당 차량의 출동 시작 시각을 기록.
+    - VideoRecorder에서 쓰는 start_time과 같은 값을 넣어주면
+      비디오/CSV/이미지 파일 네이밍을 맞출 수 있음.
+    """
+    ts = start_time.strftime("%Y%m%d_%H%M%S")
+    _car_start_ts[car_no] = ts
+    print(f"[YOLO 워커] set_run_start_time car={car_no}, ts={ts}")
+
+
 def enqueue_frame(car_no: str, frame_b64: str):
     """
     WS 서버에서 video 이벤트 받을 때 프레임 큐에 넣기
@@ -140,7 +155,7 @@ def start_yolo_worker():
 
     _worker_thread = threading.Thread(target=_worker_loop, daemon=True)
     _worker_thread.start()
-    _worker_started = True
+    _worker_started = True    # 순서 살짝 수정
     print("🧠 YOLO 워커 스레드 시작됨")
 
 
@@ -223,7 +238,7 @@ def _worker_loop():
                     track_id = int(box.id[0])
                     conf = float(box.conf[0])
 
-                    # 🔽 confidence 0.6 미만은 전부 무시
+                    # 🔽 confidence 기준 이하 박스 무시
                     if conf < CONF_THRESHOLD:
                         continue
 
@@ -282,8 +297,17 @@ def _worker_loop():
                                     save_img_resized = save_img
 
                                 safe_car_no = normalize_car_no(car_no)
-                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                                filename = f"{safe_car_no}_track{track_id}_{timestamp}.jpg"
+
+                                # 🔹 출동 시작 시각 기준으로 파일명 구성
+                                start_ts = _car_start_ts.get(car_no)
+                                if start_ts is None:
+                                    # 혹시 set_run_start_time을 안 부른 경우 fallback
+                                    start_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+                                # ➜ images/{safe_car}_track{ID}_{start_ts}.jpg
+                                #    (routes/video.py 의 _list_image_keys_for_log에서
+                                #     이 패턴을 가정하고 있음)
+                                filename = f"{safe_car_no}_track{track_id}_{start_ts}.jpg"
                                 s3_key = f"{S3_IMAGE_PREFIX}/{filename}"
 
                                 # 메모리에서 바로 JPEG 인코딩 → S3 업로드
