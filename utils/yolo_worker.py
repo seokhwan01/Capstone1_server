@@ -1,6 +1,7 @@
 # utils/yolo_worker.py
 import os
 
+# ✅ OMP 에러 방지
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import base64
@@ -17,24 +18,28 @@ from ultralytics import YOLO
 from utils.car_utils import normalize_car_no
 from s3_client import s3, bucket_name
 
+# 중앙 ROI 기준 (0~1 비율)
 CENTER_MIN = 0.4
 CENTER_MAX = 0.6
 
-# 👉 이제는 굳이 로컬에 jpg 파일 안 남길 거라서, 디렉토리는 필수는 아님
+# 👉 디버그용 폴더 (실제 JPG는 저장 안 하지만, 필요하면 찍어볼 때 사용)
 IMAGE_DIR = os.path.abspath("report_images")
 S3_IMAGE_PREFIX = "images"
 
 _frame_queue: "queue.Queue[tuple[str, str, float | None, float | None]]" = queue.Queue(maxsize=200)
 _last_gps: dict[str, tuple[float | None, float | None]] = {}
 
+# 🔥 GPU / CPU 선택
 if torch.cuda.is_available():
     DEVICE = "cuda:0"
 else:
     DEVICE = "cpu"
 print(f"[YOLO 워커] Using device: {DEVICE}")
 
+# YOLO 모델
 _model = YOLO("best.pt")
 
+# ---------- 추적 상태 ----------
 _in_center_time: dict[tuple[str, int], float] = {}
 _best_frame: dict[tuple[str, int], np.ndarray] = {}
 _best_score: dict[tuple[str, int], float] = {}
@@ -45,10 +50,11 @@ _saved_ids: set[tuple[str, int]] = set()
 _worker_started = False
 _worker_thread: threading.Thread | None = None
 
+# 프레임 샘플링
 _FRAME_SKIP = 3
 _frame_counter = 0
 
-# 🔽 저장할 이미지 해상도 (너무 크지 않게 줄이기)
+# 🔽 저장할 이미지 해상도 (너무 크지 않게)
 SAVE_W = 640
 SAVE_H = 640
 JPEG_QUALITY = 90
@@ -56,8 +62,13 @@ JPEG_QUALITY = 90
 
 # ---------- 공용 함수: S3 업로드 리트라이 ----------
 
-def _upload_bytes_to_s3_with_retry(data: bytes, s3_key: str, content_type: str,
-                                   retries: int = 3, delay: float = 1.0) -> bool:
+def _upload_bytes_to_s3_with_retry(
+    data: bytes,
+    s3_key: str,
+    content_type: str,
+    retries: int = 3,
+    delay: float = 1.0,
+) -> bool:
     """
     S3 업로드가 가끔 실패해도 워커가 죽지 않도록,
     정해진 횟수만큼 재시도하고 실패하면 False 리턴.
@@ -70,7 +81,10 @@ def _upload_bytes_to_s3_with_retry(data: bytes, s3_key: str, content_type: str,
                 Body=data,
                 ContentType=content_type,
             )
-            print(f"✅ S3 업로드 성공({attempt}/{retries}) → https://{bucket_name}.s3.us-east-1.amazonaws.com/{s3_key}")
+            print(
+                f"✅ S3 업로드 성공({attempt}/{retries}) → "
+                f"https://{bucket_name}.s3.us-east-1.amazonaws.com/{s3_key}"
+            )
             return True
         except Exception as e:
             print(f"❌ S3 업로드 실패({attempt}/{retries}): {e}")
@@ -81,19 +95,27 @@ def _upload_bytes_to_s3_with_retry(data: bytes, s3_key: str, content_type: str,
 # ---------- 외부 API ----------
 
 def update_car_gps(car_no: str, lat: float | None, lng: float | None):
+    """
+    WS 서버에서 current 이벤트 받을 때마다 최신 GPS 업데이트
+    """
     _last_gps[car_no] = (lat, lng)
 
 
 def enqueue_frame(car_no: str, frame_b64: str):
+    """
+    WS 서버에서 video 이벤트 받을 때 프레임 큐에 넣기
+    """
     global _frame_counter
     if not frame_b64:
         return
 
     _frame_counter += 1
 
+    # 프레임 샘플링
     if _frame_counter % _FRAME_SKIP != 0:
         return
 
+    # 큐 과부하 방지
     if _frame_queue.qsize() > 50:
         print("⚠️ [YOLO 워커] 큐 과부하 → 이번 프레임 스킵")
         return
@@ -106,6 +128,9 @@ def enqueue_frame(car_no: str, frame_b64: str):
 
 
 def start_yolo_worker():
+    """
+    모듈 import 시 한 번만 불러서 워커 스레드 시작
+    """
     global _worker_started, _worker_thread
     if _worker_started:
         return
@@ -119,13 +144,14 @@ def start_yolo_worker():
 # ---------- 내부 워커 루프 ----------
 
 def _worker_loop():
-    os.makedirs(IMAGE_DIR, exist_ok=True)  # 필요 없지만 혹시 모를 디버그용
+    os.makedirs(IMAGE_DIR, exist_ok=True)
     print("yolo 확인 (worker loop 시작)")
 
     while True:
         try:
             car_no, frame_b64, lat, lng = _frame_queue.get()
 
+            # 종료 신호
             if frame_b64 is None:
                 print("🧠 YOLO 워커 종료")
                 _frame_queue.task_done()
@@ -152,17 +178,33 @@ def _worker_loop():
             h, w, _ = frame.shape
             now = time.time()
 
+            # HUD (시간 + GPS)
             time_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             if lat is not None and lng is not None:
                 gps_text = f"GPS: {lat:.6f}, {lng:.6f}"
             else:
                 gps_text = "GPS: -"
 
-            cv2.putText(raw_frame, time_text, (10, 40),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 0), 3)
-            cv2.putText(raw_frame, gps_text, (10, 90),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 0), 3)
+            cv2.putText(
+                raw_frame,
+                time_text,
+                (10, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.1,
+                (255, 255, 0),
+                3,
+            )
+            cv2.putText(
+                raw_frame,
+                gps_text,
+                (10, 90),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.1,
+                (255, 255, 0),
+                3,
+            )
 
+            # YOLO 추적
             results = _model.track(
                 raw_frame,
                 persist=True,
@@ -194,12 +236,14 @@ def _worker_loop():
 
                     print(
                         f"[YOLO 워커] 감지 car={car_no}, track_id={track_id}, "
-                        f"conf={conf:.2f}, center={is_center}, bbox=({x1},{y1},{x2},{y2})"
+                        f"conf={conf:.2f}, center={is_center}, "
+                        f"bbox=({x1},{y1},{x2},{y2})"
                     )
 
                     if is_center:
                         _in_center_time[key] += now - _last_timestamp[key]
 
+                        # 품질(신뢰도) 가장 좋은 프레임 저장
                         if conf > _best_score[key]:
                             _best_score[key] = conf
                             _best_frame[key] = raw_frame.copy()
@@ -213,22 +257,29 @@ def _worker_loop():
                                 save_img = _best_frame[key].copy()
                                 bx1, by1, bx2, by2 = _last_bbox[key]
 
-                                cv2.rectangle(save_img, (bx1, by1), (bx2, by2),
-                                              (0, 0, 255), 4)
+                                cv2.rectangle(
+                                    save_img,
+                                    (bx1, by1),
+                                    (bx2, by2),
+                                    (0, 0, 255),
+                                    4,
+                                )
 
-                                # 🔽 해상도 줄이기 (너무 큰 이미지 방지)
+                                # 해상도 줄이기
                                 try:
-                                    save_img_resized = cv2.resize(save_img, (SAVE_W, SAVE_H))
+                                    save_img_resized = cv2.resize(
+                                        save_img, (SAVE_W, SAVE_H)
+                                    )
                                 except Exception as e:
                                     print("[YOLO 워커] ⚠️ resize 실패:", e)
-                                    save_img_resized = save_img  # 실패하면 원본이라도
+                                    save_img_resized = save_img
 
                                 safe_car_no = normalize_car_no(car_no)
                                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                                 filename = f"{safe_car_no}_track{track_id}_{timestamp}.jpg"
                                 s3_key = f"{S3_IMAGE_PREFIX}/{filename}"
 
-                                # 🔽 파일로 저장하지 않고 메모리에서 바로 JPEG 인코딩 → S3 업로드
+                                # 메모리에서 바로 JPEG 인코딩 → S3 업로드
                                 ok, buf = cv2.imencode(
                                     ".jpg",
                                     save_img_resized,
