@@ -15,6 +15,8 @@ from utils.crossroad_utils import (
 )
 from utils.video_recorder import VideoRecorder
 from utils.csv_logger import start_csv_logging, log_position, stop_csv_logging, set_eta_time
+# 🔽 YOLO 워커 관련 추가
+from utils.yolo_worker import start_yolo_worker, enqueue_frame, update_car_gps
 
 # 차량별 비디오 레코더
 recorders: dict[str, VideoRecorder] = {}
@@ -30,6 +32,8 @@ clients: set[websockets.WebSocketServerProtocol] = set()
 
 # ✅ 각 WebSocket 연결이 어떤 차량인지 매핑
 ws_car_map: dict[websockets.WebSocketServerProtocol, str] = {}
+
+
 
 
 async def broadcast_dict(data: dict):
@@ -283,19 +287,28 @@ async def ws_handler(websocket):
             elif t == "current":
                 print("🚑 current 수신:", data)
                 current = data.get("current", {})
-                lat = current.get("lat")
-                lon = current.get("lng")
+                lat_raw = current.get("lat")
+                lon_raw = current.get("lng")
                 speed = data.get("speed")
                 car_no = data.get("car")
 
+                # ✅ 숫자 변환
+                lat = float(lat_raw) if lat_raw is not None else None
+                lon = float(lon_raw) if lon_raw is not None else None
+
+                # ✅ YOLO 워커에 GPS 업데이트
+                if car_no:
+                    update_car_gps(car_no, lat, lon)
+
+                # CSV 로그 기록
                 if car_no and lat is not None and lon is not None:
                     try:
                         ts = datetime.now()
                         log_position(
                             ts,
                             car_no,
-                            float(lat),
-                            float(lon),
+                            lat,
+                            lon,
                             float(speed) if speed is not None else None,
                         )
                     except Exception as e:
@@ -303,7 +316,7 @@ async def ws_handler(websocket):
 
                 if lat is not None and lon is not None and car_no:
                     try:
-                        lat_f, lon_f = float(lat), float(lon)
+                        lat_f, lon_f = lat, lon
 
                         crossroads = expected_crossroads.get(car_no, [])
                         if not crossroads:
@@ -399,28 +412,29 @@ async def ws_handler(websocket):
                 # ✅ 메시지에 car가 없으면 WebSocket 매핑에서 가져오기
                 if not car_no:
                     car_no = ws_car_map.get(websocket)
-                    # print(f"[video] car_no가 None이라 ws_car_map에서 가져옴 → {car_no}")
 
                 if not car_no:
                     # print("[video] ⚠ car_no를 찾을 수 없음 (메시지에도 없고 ws_car_map에도 없음)")
                     continue
 
                 if frame_b64:
+                    # 1) 대시보드에 브로드캐스트
                     out = {
                         "event": "video",
                         "car": car_no,
                         "frame": frame_b64,
                     }
                     await broadcast_dict(out)
-                    # print("ws.server 비디오 rec전~~~~~~")
-                    # print(f"[video] car_no={car_no}, recorders.keys={list(recorders.keys())}")
+
+                    # 2) ✅ YOLO 워커 큐에 프레임 전달 (백그라운드에서 분석/이미지 저장)
+                    enqueue_frame(car_no, frame_b64)
+
+                    # 3) 기존 VideoRecorder 녹화 유지
                     rec = recorders.get(car_no)
                     if rec:
-                        # print("ws.server 읽기 함수 호출~~~~~~~")
                         rec.write_frame_b64(frame_b64)
                     else:
                         pass
-                        # print(f"[video] ⚠️ recorder 없음 for car={car_no}")
 
             else:
                 print(f"❓ 알 수 없는 type 수신: {t}, data={data}")
@@ -440,4 +454,6 @@ async def ws_main():
 
 def start_ws_server():
     print("🔧 WebSocket Server starting...")
+    #YOLO 워커 스레드 시작
+    start_yolo_worker()
     asyncio.run(ws_main())
