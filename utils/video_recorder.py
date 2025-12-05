@@ -17,12 +17,11 @@ class VideoRecorder:
         ts = start_time.strftime("%Y%m%d_%H%M%S")
         safe_car = normalize_car_no(car_no)
 
-        # ✅ mp4로 통일
+        # ✅ mp4 + 리눅스에서도 안전한 코덱 우선 사용
         self.ext = "mp4"
         self.preferred_fourccs = [
-            ("avc1", "H.264"),   # 1순위: 브라우저 스트리밍용
-            ("mp4v", "MPEG-4"),  # 2순위: 기존 방식
-            ("MJPG", "MJPEG"),   # 3순위: 최후의 보루 (용량 큼)
+            ("mp4v", "MPEG-4"),  # 1순위: 대부분 환경에서 잘 됨
+            ("MJPG", "MJPEG"),   # 2순위: 용량은 크지만 거의 100% 동작
         ]
 
         self.file_name = f"{safe_car}_{ts}.{self.ext}"
@@ -35,7 +34,7 @@ class VideoRecorder:
         print(f"[VideoRecorder] 초기화 완료: {self.file_path} (os={os.name})")
 
     def _open_writer_with_fourcc(self, width: int, height: int):
-        """여러 코덱(avc1 → mp4v → MJPG) 순서대로 시도"""
+        """여러 코덱(mp4v → MJPG) 순서대로 시도"""
         for code, name in self.preferred_fourccs:
             fourcc = cv2.VideoWriter_fourcc(*code)
             print(f"[VideoRecorder] VideoWriter 생성 시도: fourcc={code}({name}), size=({width}x{height})")
@@ -55,16 +54,13 @@ class VideoRecorder:
             else:
                 print(f"[VideoRecorder] ❌ fourcc={code}({name}) 로 VideoWriter open 실패")
 
-        # 전부 실패
         print("[VideoRecorder] ❌ 사용 가능한 코덱으로 VideoWriter 생성 실패")
         self.writer = None
         return False
 
     def _ensure_writer(self, width: int, height: int):
-        """첫 프레임 들어올 때 실제 해상도에 맞춰 VideoWriter 생성"""
         if self.writer is not None:
             return True
-
         return self._open_writer_with_fourcc(width, height)
 
     def write_frame_b64(self, frame_b64: str):
@@ -92,9 +88,8 @@ class VideoRecorder:
 
             h, w = frame.shape[:2]
 
-            # ✅ 첫 프레임에서 writer 생성 (avc1 우선 시도)
+            # ✅ 첫 프레임에서 writer 생성
             if not self._ensure_writer(w, h):
-                # writer 못 열면 더 진행 불가
                 return
 
             # writer 사이즈와 다르면 맞춰주기
@@ -132,9 +127,7 @@ class VideoRecorder:
         # S3 업로드
         try:
             s3_key = f"videos/{self.file_name}"
-
-            # mp4로 통일
-            content_type = "video/mp4"
+            content_type = "video/mp4"   # mp4 그대로 유지
 
             s3.upload_file(
                 self.file_path,
