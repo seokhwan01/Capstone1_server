@@ -54,6 +54,9 @@ _worker_thread: threading.Thread | None = None
 _FRAME_SKIP = 3
 _frame_counter = 0
 
+# 최소 confidence 기준
+CONF_THRESHOLD = 0.6
+
 # 🔽 저장할 이미지 해상도 (너무 크지 않게)
 SAVE_W = 640
 SAVE_H = 640
@@ -219,6 +222,10 @@ def _worker_loop():
 
                     track_id = int(box.id[0])
                     conf = float(box.conf[0])
+
+                    # 🔽 confidence 0.6 미만은 전부 무시
+                    if conf < CONF_THRESHOLD:
+                        continue
 
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
 
