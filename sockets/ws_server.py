@@ -13,6 +13,14 @@ from utils.crossroad_utils import (
     compute_crossroad_directions,
     haversine,
 )
+
+from sockets.route_matcher import (
+    normal_car_tracks,
+    ambulance_routes,
+    check_same_road_and_direction,
+    get_any_ambulance_route,
+)
+
 from utils.video_recorder import VideoRecorder
 from utils.csv_logger import start_csv_logging, log_position, stop_csv_logging, set_eta_time
 # 🔽 YOLO 워커 관련 추가
@@ -214,6 +222,11 @@ async def ws_handler(websocket):
 
                     car_no = data.get("car")
 
+                    # ✅ 여기서 구급차 polyline 저장
+                    if car_no:
+                        ambulance_routes[car_no] = norm_points
+                        print(f"🗺 구급차 경로 저장 완료: car={car_no}, points={len(norm_points)}")
+
                     # duration(초) → ETA 계산
                     duration_sec = data.get("duration")
 
@@ -403,11 +416,56 @@ async def ws_handler(websocket):
             # --------------------------------------------------
             elif t == "normal_current":
                 print("🚗 일반 차량 현재 위치 수신:", data)
+
+                car_id = data.get("car")
+                current = data.get("current", {})
+                lat_raw = current.get("lat")
+                lon_raw = current.get("lng")
+
+                same_road = False
+                same_dir = False
+                ref_amb_car = None
+
+                try:
+                    # ✅ 방어 로직 추가
+                    if car_id is None or lat_raw is None or lon_raw is None:
+                        print("⚠️ normal_current 좌표/차량 정보 부족:", data)
+                    else:
+                        lat = float(lat_raw)
+                        lon = float(lon_raw)
+
+                        # 1) 차량별 좌표 저장
+                        normal_car_tracks[car_id].append({"lat": lat, "lng": lon})
+                        track_points = list(normal_car_tracks[car_id])
+
+                        # 2) 구급차 경로 하나 가져오기
+                        ref_amb_car, amb_route = get_any_ambulance_route()
+
+                        if amb_route:
+                            same_road, same_dir = check_same_road_and_direction(
+                                amb_route,
+                                track_points,
+                            )
+                            print(
+                                f"🔍 일반차 {car_id} vs 구급차 {ref_amb_car}: "
+                                f"same_road={same_road}, same_dir={same_dir}"
+                            )
+                        else:
+                            print("⚠️ 비교할 구급차 경로 없음")
+
+                except Exception as e:
+                    print("⚠️ normal_current 처리 오류:", e)
+
                 out = {
                     "event": "normalcar_current",
+                    "same_road": same_road,
+                    "same_dir": same_dir,
+                    "same_road_and_dir": same_road and same_dir,
+                    "ref_ambulance_car": ref_amb_car,
                     **data,
                 }
                 await broadcast_dict(out)
+
 
             # --------------------------------------------------
             # 6) 영상 프레임

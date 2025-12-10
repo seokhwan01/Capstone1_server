@@ -11,6 +11,7 @@ body {
   min-height: 100vh;
   font-family: sans-serif;
   background: #f4f4f9;
+  padding-bottom: 80px;   /* ✅ fixed 버튼만큼 아래 여유 확보 */
 }
 
 /* 공통 Header/Nav */
@@ -53,26 +54,29 @@ nav a:hover {
 /* 대시보드 레이아웃 (기존) */
 #top-section {
   display: flex;
-  flex: 7;
-  min-height: 0;
+  gap: 8px;
+  padding: 8px;
+  /* 화면 높이의 55% 정도를 상단(영상+지도)에 사용 */
+  height: 55vh;
+  min-height: 320px;
+  box-sizing: border-box;
 }
 
+/* 영상/지도는 반반 */
 #video-section,
 #map_div {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  flex: 1 1 0;
+  position: relative;
 }
 
 .video-feed {
-  width: 90%;
-  max-width: 100%;
-  height: auto;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;      /* 비율 유지하면서 꽉 채우기 */
   border: 2px solid #ccc;
   border-radius: 8px;
-  max-height: 90%;
 }
+
 
 #map_div {
   height: 100%;
@@ -83,7 +87,11 @@ nav a:hover {
   overflow-y: auto;
   padding: 10px 20px;
   background-color: #f9f9f9;
+  margin-top: 12px;       /* 버튼이랑 살짝 띄우기 (위쪽) */
+  margin-bottom: 12px;    /* 내용이 짧아도 너무 밑으로 안 내려가게 */
+  min-height: 160px;      /* 로그가 없어도 일정 높이는 유지 */
 }
+
 
 .data-table {
   width: 100%;

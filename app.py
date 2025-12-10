@@ -8,12 +8,20 @@ from config import Config
 
 from routes import auth, dashboard, video
 from sockets.ws_server import start_ws_server  # ✅ WS 서버 스타터 import
+import time
+
+APP_BOOT_ID = str(int(time.time()))  # 서버 프로세스 시작 시각
+
 
 app = Flask(__name__)
 app.config.from_object(Config)
 
 db.init_app(app)
 
+
+@app.context_processor
+def inject_boot_id():
+    return {"APP_BOOT_ID": APP_BOOT_ID}
 
 @app.route("/")
 def index():

@@ -76,17 +76,44 @@ function renderTableFromCache() {
     `;
     table.appendChild(row);
   }
+
+  // ✅ 로그가 하나도 없으면 안내 문구 1줄 출력
+  if (entries.length === 0) {
+    const emptyRow = document.createElement("tr");
+    emptyRow.innerHTML = `
+      <td colspan="5" style="padding: 12px; color: #777;">
+        현재 진행 중인 차량 로그가 없습니다.
+      </td>
+    `;
+    table.appendChild(emptyRow);
+  }
 }
 
 // ---------------------
 //  페이지 로드시 복원
 // ---------------------
+// ✅ 부트 ID 저장용 키(서버 세션 버전)
+const STORAGE_BOOT_KEY = "vehicle_log_boot_id";
+
 document.addEventListener("DOMContentLoaded", () => {
-  localStorage.removeItem(STORAGE_KEY);  // ← 이 줄 추가
+  try {
+    const prevBootId = localStorage.getItem(STORAGE_BOOT_KEY);
+
+    // 서버가 새로 켜졌거나(값 변경) 처음 접속한 경우(null)
+    if (!prevBootId || prevBootId !== DASHBOARD_BOOT_ID) {
+      console.log("🧹 서버 재시작 감지 → 로컬 로그 초기화");
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.setItem(STORAGE_BOOT_KEY, DASHBOARD_BOOT_ID);
+    }
+  } catch (e) {
+    console.warn("⚠️ 부트 ID 체크 중 에러:", e);
+  }
+
   logCache = loadCache();
   console.log("📂 vehicle_log 복원:", logCache);
   renderTableFromCache();
 });
+
 
 // ---------------------
 //  WebSocket 처리

@@ -51,7 +51,9 @@
   <!-- ✅ 기능별 분리 -->
   <script src="{{ url_for('static', filename='js/drawline.js') }}"></script>
   <script src="{{ url_for('static', filename='js/camera.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/vehicle_log.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/vehicle_log.js') }}">
+    const DASHBOARD_BOOT_ID = "{{ APP_BOOT_ID }}";
+  </script>
 </body>
 
 </html>

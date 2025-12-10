@@ -218,9 +218,21 @@ $(function () {
 DrawLine.initMap = function () {
     DrawLine.map = new Tmapv2.Map("map_div", {
         width: "100%",
-        height: "500px",
+        height: "100%",
         zoomControl: true,
         scrollwheel: true,
+    });
+
+    // 창 크기 바뀌면 지도가 새 사이즈에 맞춰 다시 그려지도록
+    window.addEventListener("resize", () => {
+        try {
+            if (DrawLine.map) {
+                const center = DrawLine.map.getCenter();
+                DrawLine.map.setCenter(center); // 리사이즈 트리거용
+            }
+        } catch (e) {
+            console.warn("⚠️ 지도 리사이즈 중 오류:", e);
+        }
     });
 };
 
