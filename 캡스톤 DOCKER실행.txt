@@ -9,8 +9,10 @@ sudo docker run --gpus all -d \
   --restart unless-stopped \
   capstone_flask
 
+현재 로그 부터만 보기 
+sudo docker logs -f --tail 0 capstone_flask
 
-로그 키기
+전체 로그 키기
 sudo docker logs -f capstone_flask
 
 서버 재시작

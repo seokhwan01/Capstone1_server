@@ -29,7 +29,9 @@ CONF_THRESHOLD = 0.6
 IMAGE_DIR = os.path.abspath("report_images")
 S3_IMAGE_PREFIX = "images"
 
-_frame_queue: "queue.Queue[tuple[str, str, float | None, float | None]]" = queue.Queue(maxsize=200)
+_frame_queue: "queue.Queue[tuple[str, str, float | None, float | None]]" = queue.Queue(
+    maxsize=200
+)
 _last_gps: dict[str, tuple[float | None, float | None]] = {}
 
 # 🔹 각 차량별 출동 시작 시각 (문자열 "YYYYMMDD_HHMM%S")
@@ -68,6 +70,7 @@ JPEG_QUALITY = 90
 
 # ---------- 공용 함수: S3 업로드 리트라이 ----------
 
+
 def _upload_bytes_to_s3_with_retry(
     data: bytes,
     s3_key: str,
@@ -99,6 +102,7 @@ def _upload_bytes_to_s3_with_retry(
 
 
 # ---------- 외부 API ----------
+
 
 def update_car_gps(car_no: str, lat: float | None, lng: float | None):
     """
@@ -172,6 +176,7 @@ def start_yolo_worker():
 
 # ---------- 내부 유틸: IoU 기반 기존 트랙 매칭 ----------
 
+
 def _find_match_key_for_new_box(
     car_no: str,
     x1: int,
@@ -220,6 +225,7 @@ def _find_match_key_for_new_box(
 
 
 # ---------- 내부 워커 루프 ----------
+
 
 def _worker_loop():
     os.makedirs(IMAGE_DIR, exist_ok=True)
@@ -290,6 +296,7 @@ def _worker_loop():
                 device=DEVICE,
             )[0]
 
+            # ---------- 신고 로직 ----------
             if results.boxes is not None:
                 for box in results.boxes:
                     if box.id is None:
@@ -360,7 +367,9 @@ def _worker_loop():
                         # 10초 이상 중앙 유지 + 아직 저장 안 했으면
                         if _in_center_time[key] >= 10 and key not in _saved_ids:
                             if key not in _best_frame:
-                                print(f"[YOLO 워커] ⚠️ best_frame 없음 → 저장 스킵 (key={key})")
+                                print(
+                                    f"[YOLO 워커] ⚠️ best_frame 없음 → 저장 스킵 (key={key})"
+                                )
                             else:
                                 save_img = _best_frame[key].copy()
                                 bx1, by1, bx2, by2 = _last_bbox[key]
@@ -388,20 +397,29 @@ def _worker_loop():
                                 start_ts = _car_start_ts.get(car_no)
                                 if start_ts is None:
                                     # 혹시 set_run_start_time을 안 부른 경우 fallback
-                                    start_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                    start_ts = datetime.now().strftime(
+                                        "%Y%m%d_%H%M%S"
+                                    )
 
                                 # ➜ images/{safe_car}_track{ID}_{start_ts}.jpg
-                                filename = f"{safe_car_no}_track{track_id}_{start_ts}.jpg"
+                                filename = (
+                                    f"{safe_car_no}_track{track_id}_{start_ts}.jpg"
+                                )
                                 s3_key = f"{S3_IMAGE_PREFIX}/{filename}"
 
                                 # 메모리에서 바로 JPEG 인코딩 → S3 업로드
                                 ok, buf = cv2.imencode(
                                     ".jpg",
                                     save_img_resized,
-                                    [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY],
+                                    [
+                                        int(cv2.IMWRITE_JPEG_QUALITY),
+                                        JPEG_QUALITY,
+                                    ],
                                 )
                                 if not ok:
-                                    print("❌ [YOLO 워커] JPEG 인코딩 실패 → 업로드 스킵")
+                                    print(
+                                        "❌ [YOLO 워커] JPEG 인코딩 실패 → 업로드 스킵"
+                                    )
                                 else:
                                     img_bytes = buf.tobytes()
                                     _upload_bytes_to_s3_with_retry(
@@ -417,8 +435,15 @@ def _worker_loop():
                     _last_timestamp[key] = now
 
             _frame_queue.task_done()
-            # ----- 디버그 프레임 만들기 -----
+
+            # ---------- 디버그 프레임 만들기 ----------
             debug_frame = raw_frame.copy()
+
+            # 🔶 중앙 ROI 구간(40%~60%)을 주황색 세로선으로 시각화
+            x_left = int(CENTER_MIN * w)
+            x_right = int(CENTER_MAX * w)
+            cv2.line(debug_frame, (x_left, 0), (x_left, h), (0, 165, 255), 2)
+            cv2.line(debug_frame, (x_right, 0), (x_right, h), (0, 165, 255), 2)
 
             if results.boxes is not None:
                 for box in results.boxes:
@@ -427,17 +452,39 @@ def _worker_loop():
 
                     track_id = int(box.id[0])
                     conf = float(box.conf[0])
+
+                    # 디버깅도 신고와 동일하게 conf 필터 적용
+                    if conf < CONF_THRESHOLD:
+                        continue
+
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
 
-                    cx = (x1 + x2) / 2
+                    cx = (x1 + x2) / 2.0
+                    cy = (y1 + y2) / 2.0
                     cx_norm = cx / w
                     is_center = CENTER_MIN < cx_norm < CENTER_MAX
                     color = (0, 255, 0) if is_center else (0, 0, 255)
 
+                    key = (car_no, track_id)
+                    center_time = _in_center_time.get(key, 0.0)
+
+                    # bbox 그리기
                     cv2.rectangle(debug_frame, (x1, y1), (x2, y2), color, 2)
+
+                    # 🔴 bbox 중앙 빨간 점
+                    cv2.circle(
+                        debug_frame,
+                        (int(cx), int(cy)),
+                        5,
+                        (0, 0, 255),
+                        -1,
+                    )
+
+                    # 라벨: ID / conf / 중앙 카운트 시간
+                    label = f"ID:{track_id} {conf:.2f} t:{center_time:.1f}s"
                     cv2.putText(
                         debug_frame,
-                        f"ID:{track_id} {conf:.2f}",
+                        label,
                         (x1, max(0, y1 - 10)),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.6,
@@ -460,8 +507,11 @@ def _worker_loop():
                     (0, 255, 255),
                     3,
                 )
-             # 🔻 여기부터 추가 (JPEG 인코딩 + WebSocket 송출)
-            ok, buf = cv2.imencode(".jpg", debug_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+
+            # 🔻 JPEG 인코딩 + WebSocket 송출
+            ok, buf = cv2.imencode(
+                ".jpg", debug_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70]
+            )
             if not ok:
                 print("⚠️ YOLO 디버그 JPEG 인코딩 실패")
             else:
@@ -469,15 +519,17 @@ def _worker_loop():
                 try:
                     # 순환 import 피하려고 함수 안에서 import
                     from sockets.ws_server import broadcast_from_thread
-                    broadcast_from_thread({
-                        "event": "yolo_debug",
-                        "car": car_no,
-                        "frame": debug_b64,
-                    })
+
+                    broadcast_from_thread(
+                        {
+                            "event": "yolo_debug",
+                            "car": car_no,
+                            "frame": debug_b64,
+                        }
+                    )
                 except Exception as e:
                     print("⚠️ YOLO 디버그 프레임 송출 실패:", e)
-            # 🔺 여기까지 추가
-
+            # 🔺 여기까지 디버그 송출
 
         except Exception as e:
             print("❌ [YOLO 워커] 처리 중 오류:", e)
