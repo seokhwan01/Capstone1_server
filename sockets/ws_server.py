@@ -3,7 +3,7 @@
 import json
 import asyncio
 from datetime import datetime, timedelta
-
+from sockets.ambulance_state import update_ambulance_position
 import websockets
 from extensions import db
 from models.ambulance_log import AmbulanceLog
@@ -319,6 +319,15 @@ async def ws_handler(websocket):
                 # ✅ YOLO 워커에 GPS 업데이트
                 if car_no:
                     update_car_gps(car_no, lat, lon)
+
+                # ✅ HTTP 폴링용 최신 위치 저장
+                if car_no and lat is not None and lon is not None:
+                    update_ambulance_position(
+                        car_no,
+                        lat,
+                        lon,
+                        float(speed) if speed is not None else None,
+                    )
 
                 # CSV 로그 기록
                 if car_no and lat is not None and lon is not None:
