@@ -5,7 +5,7 @@ import threading
 from flask import Flask, redirect, url_for
 from extensions import db
 from config import Config
-
+from routes import api  # 🔥 이 줄 추가
 from routes import auth, dashboard, video
 from sockets.ws_server import start_ws_server  # ✅ WS 서버 스타터 import
 import time
@@ -32,7 +32,7 @@ def index():
 app.register_blueprint(auth.bp)
 app.register_blueprint(dashboard.bp)
 app.register_blueprint(video.bp)
-
+app.register_blueprint(api.bp)  # 🔥 이 줄 추가
 
 def run_ws():
     """
