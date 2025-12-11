@@ -8,6 +8,7 @@ _latest_positions: Dict[str, Dict[str, Any]] = {}
 
 def update_ambulance_position(car_no: str, lat: float, lng: float,
                               speed: float | None = None,
+                              lane: int | None = None,   
                               ts: datetime | None = None) -> None:
     """WS에서 받은 최신 위치를 저장"""
     global _latest_positions
@@ -16,6 +17,7 @@ def update_ambulance_position(car_no: str, lat: float, lng: float,
         "lat": lat,
         "lng": lng,
         "speed": speed,
+        "lane": lane, 
         "timestamp": (ts or datetime.now()).isoformat(),
     }
 

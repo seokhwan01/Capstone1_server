@@ -327,6 +327,7 @@ async def ws_handler(websocket):
                         lat,
                         lon,
                         float(speed) if speed is not None else None,
+                        lane=2,
                     )
 
                 # CSV 로그 기록
