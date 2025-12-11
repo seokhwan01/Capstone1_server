@@ -41,8 +41,16 @@ clients: set[websockets.WebSocketServerProtocol] = set()
 # ✅ 각 WebSocket 연결이 어떤 차량인지 매핑
 ws_car_map: dict[websockets.WebSocketServerProtocol, str] = {}
 
+# ✅ YOLO 워커 같은 다른 스레드에서 쓸 이벤트 루프 저장용
+_ws_loop: asyncio.AbstractEventLoop | None = None
 
-
+# ⬇⬇⬇ 여기 추가
+def broadcast_from_thread(data: dict):
+    global _ws_loop
+    if _ws_loop is None:
+        print("⚠️ broadcast_from_thread: 이벤트 루프 준비 안 됨")
+        return
+    asyncio.run_coroutine_threadsafe(broadcast_dict(data), _ws_loop)
 
 async def broadcast_dict(data: dict):
     if not clients:
@@ -522,7 +530,9 @@ async def ws_handler(websocket):
 
 
 async def ws_main():
+    global _ws_loop        
     print("🌐 WebSocket Server running ws://0.0.0.0:5000")
+    _ws_loop = asyncio.get_running_loop()  # ⬅ 이 줄 추가
     async with websockets.serve(ws_handler, "0.0.0.0", 5000, ping_interval=None):
         await asyncio.Future()  # run forever
 

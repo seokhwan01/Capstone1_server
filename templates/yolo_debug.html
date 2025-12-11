@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>YOLO Debug Monitor</title>
+    <style>
+        body {
+            background-color: #111;
+            color: white;
+            text-align: center;
+        }
+        img {
+            margin-top: 20px;
+            width: 640px;
+            border: 3px solid #0f0;
+        }
+    </style>
+</head>
+<body>
+    <h1>YOLO Debug Monitor</h1>
+    <p>실시간 YOLO 박스/ID/CONF 상태 확인</p>
+
+    <img id="yolo_debug_img" src="/static/images/no_signal.png">
+    
+    <script>
+        const host = window.location.hostname;
+        const sock = new WebSocket(`ws://${host}:5000`);
+
+        sock.onmessage = (event) => {
+            let data;
+            try {
+                data = JSON.parse(event.data);
+            } catch {
+                return;
+            }
+
+            if (data.event === "yolo_debug") {
+                const frame = data.frame;
+                const img = document.getElementById("yolo_debug_img");
+                img.src = "data:image/jpeg;base64," + frame;
+            }
+        };
+    </script>
+</body>
+</html>

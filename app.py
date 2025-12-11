@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import os
 import threading
-from flask import Flask, redirect, url_for
+from flask import Flask, redirect, url_for,render_template
 from extensions import db
 from config import Config
 from routes import api  # 🔥 이 줄 추가
@@ -26,6 +26,10 @@ def inject_boot_id():
 @app.route("/")
 def index():
     return redirect(url_for("auth.login"))
+
+@app.route("/yolo_debug")
+def yolo_debug_page():
+    return render_template("yolo_debug.html")
 
 
 # 블루프린트 등록

@@ -417,6 +417,67 @@ def _worker_loop():
                     _last_timestamp[key] = now
 
             _frame_queue.task_done()
+            # ----- 디버그 프레임 만들기 -----
+            debug_frame = raw_frame.copy()
+
+            if results.boxes is not None:
+                for box in results.boxes:
+                    if box.id is None:
+                        continue
+
+                    track_id = int(box.id[0])
+                    conf = float(box.conf[0])
+                    x1, y1, x2, y2 = map(int, box.xyxy[0])
+
+                    cx = (x1 + x2) / 2
+                    cx_norm = cx / w
+                    is_center = CENTER_MIN < cx_norm < CENTER_MAX
+                    color = (0, 255, 0) if is_center else (0, 0, 255)
+
+                    cv2.rectangle(debug_frame, (x1, y1), (x2, y2), color, 2)
+                    cv2.putText(
+                        debug_frame,
+                        f"ID:{track_id} {conf:.2f}",
+                        (x1, max(0, y1 - 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (255, 255, 255),
+                        2,
+                    )
+
+            # 신호된 차량 ID 목록 표시
+            reported_ids = [tid for (car_, tid) in _saved_ids if car_ == car_no]
+
+            y_offset = h - 30
+            if reported_ids:
+                text = f"REPORTED: {', '.join(map(str, reported_ids))}"
+                cv2.putText(
+                    debug_frame,
+                    text,
+                    (20, y_offset),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1.0,
+                    (0, 255, 255),
+                    3,
+                )
+             # 🔻 여기부터 추가 (JPEG 인코딩 + WebSocket 송출)
+            ok, buf = cv2.imencode(".jpg", debug_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+            if not ok:
+                print("⚠️ YOLO 디버그 JPEG 인코딩 실패")
+            else:
+                debug_b64 = base64.b64encode(buf).decode("utf-8")
+                try:
+                    # 순환 import 피하려고 함수 안에서 import
+                    from sockets.ws_server import broadcast_from_thread
+                    broadcast_from_thread({
+                        "event": "yolo_debug",
+                        "car": car_no,
+                        "frame": debug_b64,
+                    })
+                except Exception as e:
+                    print("⚠️ YOLO 디버그 프레임 송출 실패:", e)
+            # 🔺 여기까지 추가
+
 
         except Exception as e:
             print("❌ [YOLO 워커] 처리 중 오류:", e)
