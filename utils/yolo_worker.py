@@ -23,7 +23,7 @@ CENTER_MIN = 0.4
 CENTER_MAX = 0.6
 
 # 최소 confidence 기준
-CONF_THRESHOLD = 0.4
+CONF_THRESHOLD = 0.3
 
 # 🔽 최소 bbox 크기 기준 (너무 작은 박스 무시)
 MIN_W = 60
