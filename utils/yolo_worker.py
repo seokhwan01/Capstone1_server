@@ -25,6 +25,10 @@ CENTER_MAX = 0.6
 # 최소 confidence 기준
 CONF_THRESHOLD = 0.6
 
+# 🔽 최소 bbox 크기 기준 (너무 작은 박스 무시)
+MIN_W = 60
+MIN_H = 60
+
 # 👉 디버그용 폴더 (실제 JPG는 저장 안 하지만, 필요하면 찍어볼 때 사용)
 IMAGE_DIR = os.path.abspath("report_images")
 S3_IMAGE_PREFIX = "images"
@@ -311,6 +315,14 @@ def _worker_loop():
 
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
 
+                    # 🔽 bbox 크기 필터 (너무 작은 건 무시)
+                    w_box = x2 - x1
+                    h_box = y2 - y1
+                    if w_box < MIN_W or h_box < MIN_H:
+                        # 필요하면 아래 주석 풀어서 디버깅 로그 사용
+                        # print(f"[YOLO 워커] 작은 bbox 무시 w={w_box}, h={h_box}, id={track_id}")
+                        continue
+
                     cx = (x1 + x2) / 2
                     cx_norm = cx / w
                     is_center = CENTER_MIN < cx_norm < CENTER_MAX
@@ -352,7 +364,7 @@ def _worker_loop():
                     print(
                         f"[YOLO 워커] 감지 car={car_no}, track_id={track_id}, "
                         f"conf={conf:.2f}, center={is_center}, "
-                        f"bbox=({x1},{y1},{x2},{y2})"
+                        f"bbox=({x1},{y1},{x2},{y2}), size=({w_box}x{h_box})"
                     )
 
                     if is_center:
@@ -459,6 +471,12 @@ def _worker_loop():
 
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
 
+                    # 🔽 bbox 크기 필터 (신고와 동일)
+                    w_box = x2 - x1
+                    h_box = y2 - y1
+                    if w_box < MIN_W or h_box < MIN_H:
+                        continue
+
                     cx = (x1 + x2) / 2.0
                     cy = (y1 + y2) / 2.0
                     cx_norm = cx / w
@@ -480,8 +498,12 @@ def _worker_loop():
                         -1,
                     )
 
-                    # 라벨: ID / conf / 중앙 카운트 시간
-                    label = f"ID:{track_id} {conf:.2f} t:{center_time:.1f}s"
+                    # 라벨: ID / conf / 중앙 카운트 시간 + bbox 크기
+                    label = (
+                        f"ID:{track_id} {conf:.2f} "
+                        f"t:{center_time:.1f}s "
+                        f"{w_box}x{h_box}"
+                    )
                     cv2.putText(
                         debug_frame,
                         label,
